@@ -214,8 +214,8 @@ class Model(dict,metaclass=ModelMetaclass):
 				sql.append('?')
 				args.append(limit)
 			elif isinstance(limit,tuple) and len(limit)==2:
-				sql.append('?','?')
-				args.append(limit)
+				sql.append('?,?')
+				args.extend(limit)
 			else:
 				raise ValueError('Invalid limit value:%s' % str(limit))
 		rs = await select(' '.join(sql),args)

@@ -12,7 +12,7 @@ import markdown2
 from aiohttp import web
 
 from coroweb import get,post
-from apis import APIError,APIValueError,APIResourceNotFoundError,APIPermissionError
+from apis import APIError,APIValueError,APIResourceNotFoundError,APIPermissionError,Page
 
 from models import User,Comment,Blog,next_id
 from config import configs
@@ -178,10 +178,22 @@ async def get_blog(id):
 		'comments' : comments
 	}
 
-@get('/api/blogs/{id}')
-async def api_get_blog(*,id):
-	blog = await Blog.find(id)
-	return blog
+@get('/manage/blogs')
+def manage_blogs(*,page='1'):
+	return {
+		'__template__' : 'manage_blogs.html',
+		'page_index' : get_page_index(page)
+	}
+
+@get('/api/blogs')
+async def api_blogs(*,page='1'):
+	page_index = get_page_index(page)
+	num = await Blog.findNumber('count(id)')
+	p = Page(num,page_index)
+	if num == 0:
+		return dict(page=0,blogs={})
+	blogs = await Blog.findAll(orderBy='created_at desc',limit=(p.offset,p.limit))
+	return dict(page=p,blogs=blogs)
 
 @get('/manage/blogs/create')	
 def manage_create_blog():
@@ -190,6 +202,11 @@ def manage_create_blog():
 		'id':'',
 		'action':'/api/blogs'
 	}
+
+@get('/api/blogs/{id}')
+async def api_get_blog(*,id):
+	blog = await Blog.find(id)
+	return blog
 
 @post('/api/blogs')
 async def api_create_blog(request,*,name,summary,content):
