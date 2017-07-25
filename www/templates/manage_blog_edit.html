@@ -21,7 +21,8 @@ function initVM(blog) {
                         $form.showFormError(err);
                     }
                     else {
-                        return location.assign('/api/blogs/' + r.id);
+                        return location.assign('/');
+                        //return location.assign('/api/blogs/' + r.id);
                     }
                 });
             }

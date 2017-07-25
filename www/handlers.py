@@ -74,16 +74,32 @@ async def cookie2user(cookie_str):
 		return None
 
 @get('/')
-def index(request):
-	summary = 'Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'
-	blogs = [
-		Blog(id='1',name='Test Blog',summary=summary,created_at=time.time()-120),
-		Blog(id='2',name='Something New',summary=summary,created_at=time.time()-3600),
-		Blog(id='3',name='Learn Swift',summary=summary,created_at=time.time()-7200)
-	]
+async def index(request,*,page='1'):
+	page_index = get_page_index(page)
+	num = await Blog.findNumber('count(id)')
+	page = Page(num,page_index)
+	if page == 0:
+		blogs = []
+	else:
+		blogs = await Blog.findAll(orderBy = 'created_at desc',limit=(page.offset,page.limit))
 	return{
 		'__template__' : 'blogs.html',
+		'page' : page,
 		'blogs' : blogs,
+		'__user__' : request.__user__
+	}
+
+@get('/blog/{id}')
+async def get_blog(id,request):
+	blog = await Blog.find(id)
+	comments = await Comment.findAll('blog_id=?',[id],orderBy='created_at desc')
+	for c in comments:
+		c.html_content = text2html(c.content)
+	blog.html_content = markdown2.markdown(blog.content)
+	return	{
+		'__template__' : 'blog.html',
+		'blog' : blog,
+		'comments' : comments,
 		'__user__' : request.__user__
 	}
 
@@ -100,44 +116,6 @@ def signin():
 	return {
 		'__template__' : 'signin.html'
 	}
-
-# 登出
-@get('/signout')
-def signout(request):
-	referer = request.headers.get('Referer')
-	r = web.HTTPFound(referer or '/')
-	r.set_cookie(COOKIE_NAME,'-delete-',max_age=0,httponly=True)
-	logging.info('user signed out')
-	return r
-
-_RE_EMAIL = re.compile(r'^[a-z0-9\.\-\_]+\@[a-z0-9\-\_]+(\.[a-z0-9\-\_]+){1,4}$')
-_RE_SHA1 = re.compile(r'^[0-9a-f]{40}$')
-
-# 注册处理
-@post('/api/users')
-async def api_register_user(*,email,name,passwd):
-	if not name or not name.strip():
-		raise APIValueError('name')
-	if not email or not _RE_EMAIL.match(email):
-		raise APIValueError('email')
-	if not passwd or not _RE_SHA1.match(passwd):
-		raise APIValueError('passwd')
-	users = await User.findAll('email=?',[email])
-	if len(users) > 0:
-		raise APIError('register:failed','email','Email is already in use')
-	uid = next_id()
-	sha1_passwd = '%s:%s' % (uid,passwd)
-	encrypt_passwd = hashlib.sha1(sha1_passwd.encode('utf-8')).hexdigest()
-	image = 'http://www.gravatar.com/avatar/%s?d=mm&s=120'
-	user = User(id=uid,name=name.strip(),email=email,passwd=encrypt_passwd,image=image % hashlib.md5(email.encode('utf-8')).hexdigest())
-	await user.save()
-	# make session cookie
-	r = web.Response()
-	r.set_cookie(COOKIE_NAME,user2cookie(user,86400),max_age=86400,httponly=True)
-	user.passwd = '******'
-	r.content_type = 'application/json'
-	r.body = json.dumps(user,ensure_ascii=False).encode('utf-8')
-	return r
 
 # 登录处理
 @post('/api/authenticate')
@@ -165,25 +143,137 @@ async def authenticate(*,email,passwd):
 	r.body = json.dumps(user,ensure_ascii=False).encode('utf-8')
 	return r
 
-@get('/blog/{id}')
-async def get_blog(id):
-	blog = await Blog.find(id)
-	comments = await Comment.findAll('blod_id=?',[id],orderBy='created_at desc')
-	for c in comments:
-		c.html_content = text2html(c.content)
-	blog.html_content = markdown2.markdown(blog.content)
-	return	{
-		'__template__' : 'blog.html',
-		'blog' : blog,
-		'comments' : comments
+# 登出
+@get('/signout')
+def signout(request):
+	referer = request.headers.get('Referer')
+	r = web.HTTPFound(referer or '/')
+	r.set_cookie(COOKIE_NAME,'-delete-',max_age=0,httponly=True)
+	logging.info('user signed out')
+	return r
+
+# 管理
+@get('/manage/')
+def manage():
+	return 'redirect:/manage/comments'
+
+# 管理评论
+@get('/manage/comments')
+def manage_comments(request,*,page='1'):
+	return {
+		'__template__' : 'manage_comments.html',
+		'page_index' : get_page_index(page),
+		'__user__' : request.__user__
 	}
 
+# 管理日志
 @get('/manage/blogs')
-def manage_blogs(*,page='1'):
+def manage_blogs(request,*,page='1'):
 	return {
 		'__template__' : 'manage_blogs.html',
-		'page_index' : get_page_index(page)
+		'page_index' : get_page_index(page),
+		'__user__' : request.__user__
 	}
+
+@get('/manage/blogs/create')
+def manage_create_blog(request):
+	return {
+		'__template__' : 'manage_blog_edit.html',
+		'id' : '',
+		'action' : '/api/blogs',
+		'__user__' : request.__user__
+	}
+
+@get('/manage/blogs/edit/{id}')
+def manage_edit_blog(request,*,id):
+	return {
+		'__template__' : 'manage_blog_edit.html',
+		'id' : id,
+		'action' : '/api/blogs/%s' % id,
+		'__user__' : request.__user__
+	}
+
+@get('/manage/users')
+def manage_users(request,*,page='1'):
+	return {
+		'__template__' : 'manage_users.html',
+		'page_index' : get_page_index(page),
+		'__user__' : request.__user__
+	}
+
+@get('/api/comments')
+async def api_comments(*,page='1'):
+	page_index = get_page_index(page)
+	num = await Comment.findNumber('count(id)')
+	p = Page(num,page_index)
+	if num == 0:
+		return dict(page=p,comments=())
+	comments = await Comment.findAll(orderBy='created_at desc',limit=(p.offset,p.limit))
+	return dict(page=p,comments=comments)
+
+@post('/api/blogs/{id}/comments')
+async def api_create_comments(id,request,*,content):
+	user = request.__user__
+	if user is None:
+		raise APIPermissionError('Please signin first')
+	if not content or not content.strip():
+		raise APIValueError('content')
+	blog = await Blog.find(id)
+	if blog is None:
+		raise APIResourceNotFoundError('Blog')
+	comment = Comment(blog_id=blog.id,user_id=user.id,user_name=user.name,user_image=user.image,content=content.strip())
+	await comment.save()
+	return comment
+
+@post('/api/comments/{id}/delete')
+async def api_delete_comments(id,request):
+	check_admin(request)
+	c = await Comment.find(id)
+	if c is None:
+		raise APIResourceNotFoundError('Comment')
+	await c.remove()
+	return dict(id=id)
+
+@get('/api/users')
+async def api_get_users(*,page='1'):
+	page_index = get_page_index(page)
+	num = await User.findNumber('count(id)')
+	p = Page(num,page_index)
+	if num ==0 :
+		return dict(page=p,users=())
+	users = await User.findAll(orderBy='created_at desc',limit=(p.offset,p.limit))
+	for u in users:
+		u.passwd = '******'
+	return dict(page=p,users=users)
+
+_RE_EMAIL = re.compile(r'^[a-z0-9\.\-\_]+\@[a-z0-9\-\_]+(\.[a-z0-9\-\_]+){1,4}$')
+_RE_SHA1 = re.compile(r'^[0-9a-f]{40}$')
+
+# 注册处理
+@post('/api/users')
+async def api_register_user(*,email,name,passwd):
+	if not name or not name.strip():
+		raise APIValueError('name')
+	if not email or not _RE_EMAIL.match(email):
+		raise APIValueError('email')
+	if not passwd or not _RE_SHA1.match(passwd):
+		raise APIValueError('passwd')
+	users = await User.findAll('email=?',[email])
+	if len(users) > 0:
+		raise APIError('register:failed','email','Email is already in use')
+	uid = next_id()
+	sha1_passwd = '%s:%s' % (uid,passwd)
+	encrypt_passwd = hashlib.sha1(sha1_passwd.encode('utf-8')).hexdigest()
+	image = 'https://1.gravatar.com/avatar/%s?s=200&r=pg&d=mm'
+	user = User(id=uid,name=name.strip(),email=email,passwd=encrypt_passwd,image=image % hashlib.md5(email.encode('utf-8')).hexdigest())
+	await user.save()
+	# make session cookie
+	r = web.Response()
+	r.set_cookie(COOKIE_NAME,user2cookie(user,86400),max_age=86400,httponly=True)
+	user.passwd = '******'
+	r.content_type = 'application/json'
+	r.body = json.dumps(user,ensure_ascii=False).encode('utf-8')
+	return r
 
 @get('/api/blogs')
 async def api_blogs(*,page='1'):
@@ -195,13 +285,6 @@ async def api_blogs(*,page='1'):
 	blogs = await Blog.findAll(orderBy='created_at desc',limit=(p.offset,p.limit))
 	return dict(page=p,blogs=blogs)
 
-@get('/manage/blogs/create')	
-def manage_create_blog():
-	return {
-		'__template__' : 'manage_blog_edit.html',
-		'id':'',
-		'action':'/api/blogs'
-	}
 
 @get('/api/blogs/{id}')
 async def api_get_blog(*,id):
@@ -228,3 +311,26 @@ async def api_create_blog(request,*,name,summary,content):
 	)
 	await blog.save()
 	return blog
+
+@post('/api/blogs/{id}')
+async def api_update_blog(id,request,*,name,summary,content):
+	check_admin(request)
+	blog = await Blog.find(id)
+	if not name or not name.strip():
+		raise APIValueError('name','name can not be empty')
+	if not summary or not summary.strip():
+		raise APIValueError('summary','summary can not be empty')
+	if not content or not content.strip():
+		raise APIValueError('content','content can not be empty')
+	blog.name = name.strip()
+	blog.summary = summary.strip()
+	blog.content = content.strip()
+	await blog.update()
+	return blog
+
+@post('/api/blogs/{id}/delete')
+async def api_delete_blog(request,*,id):
+	check_admin(request)
+	blog = await Blog.find(id)
+	await blog.remove()
+	return dict(id=id)

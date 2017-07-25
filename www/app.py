@@ -47,7 +47,9 @@ def init_jinja2(app,**kw):
 # 日志处理工厂
 async def logger_factory(app,handler):
 	async def logger(request):
-		logging.info('Request:%s %s' % (request.method,request.path))
+		dt = datetime.fromtimestamp(time.time())
+		logging.info(u'=============New Request %s:%s:%s %s:%s:%s=============' % (dt.year,dt.month,dt.day,dt.hour,dt.minute,dt.second))
+		logging.info('Request:%s %s %s' % (request.method,request.path,request.url))
 		# await asyncio.sleep(0.3)
 		return await handler(request)
 	return logger
@@ -55,7 +57,6 @@ async def logger_factory(app,handler):
 # 用户信息处理工厂
 async def auth_factory(app,handler):
 	async def auth(request):
-		logging.info('check user:%s %s' % (request.method,request.path))
 		request.__user__ = None
 		cookie_str = request.cookies.get(COOKIE_NAME)
 		if cookie_str:
@@ -65,7 +66,6 @@ async def auth_factory(app,handler):
 				request.__user__ = user
 		if request.path.startswith('/manage/') and (request.__user__ is None or not request.__user__.admin):
 			return web.HTTPFound('/signin')
-		logging.info('request.__user__:%s' % request.__user__)
 		return	await handler(request)
 	return auth
 

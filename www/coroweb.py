@@ -110,7 +110,7 @@ class RequestHandler(object):
 					kw = dict(**params)
 				else:
 					return web.HTTPBadRequest(text = 'Unsupported content_type:%s' % request.content_type)
-			if request == 'GET':
+			if request.method == 'GET':
 				qs = request.query_string
 				if qs:
 					kw = dict()

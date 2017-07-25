@@ -33,7 +33,8 @@ async def destory_pool():
 
 #sql文日志输出
 def log(sql,args=()):
-	logging.info('SQL：%s' % sql)
+	sqllog = ('SQL：%s' % sql).replace('?','%s');
+	logging.info(sqllog % tuple(args or ()) )
 
 #SELECT语句
 async def select(sql,args,size=None):
@@ -51,7 +52,7 @@ async def select(sql,args,size=None):
 
 #INSERT、UPDATE、DELETE语句
 async def execute(sql,args,autocommit=True):
-	log(sql)
+	log(sql,args)
 	async with __pool.get() as conn:
 		if not autocommit:
 			await conn.begin()
